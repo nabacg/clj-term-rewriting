@@ -32,7 +32,7 @@
         (empty? more) nil
         :else ((apply alt more) t)))))
 
-(def term? list?) ;todo maybe seq?
+(def term? seq?) ;todo maybe seq?
 
 (defn all [s]
   (fn [t]
