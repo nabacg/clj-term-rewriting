@@ -1,54 +1,55 @@
 (ns clj-term-rewriting.core
-  (:require [clojure.core.match :refer [match]]))
-
-
-(defrecord Expr [symbol term])
-
-(defrecord Term [symbol exprs])
-
+  (:require [clojure.core.match :refer [match matchv]]))
 
 (defmacro rule [pattern expr]
-  (fn [t]
-    (match t
-           pattern expr
-           :else false)))
+  (let [pattern (if (coll? pattern) (vec pattern) [pattern])
+        t (gensym)]
+    `(fn [~t]
+      (match [~t]
+             [(~pattern :seq)] ~expr
+             :else false))))
 
+; (macroexpand-1 '(rule [:a 42] :nice))
+
+;((rule [:a 42] :nice) 23)
 (def pass (rule x x))
 
-(def fail (rule _ false))
+(def fail (rule _ nil))
 
+;((rule [:a 42] :nice) [:a 42])
 
 (defn pipe [s p]
   (fn [t]
     (if-let [u (s t)]
-      (p t)
-      false)))
+      (p u)
+      nil)))
 
 (defn alt [s & more]
   (fn [t]
     (let [u (s t)]
       (cond
         u u
-        (empty? more) false
+        (empty? more) nil
         :else ((apply alt more) t)))))
 
-(def term? coll?) ;todo maybe seq?
+(def term? list?) ;todo maybe seq?
 
 (defn all [s]
   (fn [t]
     (if (term? t)
       (let [children (map s (rest t))]
-        (if (some (partial = false) children)
-          false
-          (cons (first t) children))))))
+        (when (every? (comp not nil?) children)
+          (cons (first t) children)
+          ))
+      t)))
 
 (defn try-rule [s]
   (alt s pass))
 
 
-(defn repeat [s]
+(defn repeat-rule [s]
   (fn [t]
-    ((try-rule (pipe s (repeat s))) t)))
+    ((try-rule (pipe s (repeat-rule s))) t)))
 
 (defn top-down [s]
   (fn [t]
@@ -64,24 +65,33 @@
 
 
 (def evaluation
-  (alt (rule `(not true) 'false)
-       (rule `(not false) 'true)
+  (alt (rule (not true) false)
+       (rule (not false) true)
 
-       (rule `(and true ,x) x)
-       (rule `(and ,x true) x)
-       (rule `(and false ,x) 'false)
-       (rule `(and ,x false) 'false)
+       (rule (and true x) x)
+       (rule (and x true) x)
+       (rule (and false x) false)
+       (rule (and x false) false)
 
-       (rule `(or true ,x) 'true)
-       (rule `(or ,x true) 'true)
-       (rule `(or false ,x) x)
-       (rule `(or ,x false) x)
-       ))
+       (rule (or true x) true)
+       (rule (or x true) true)
+       (rule (or false x) x)
+       (rule (or x false) x)))
 
-(def evaluate (bottom-up (repeat evaluation)))
+(def evaluate (bottom-up (repeat-rule evaluation)))
+
+;; (evaluate '(not true))
+
+;;(evaluate '(and true unknown))
+;;(evaluate '(and (not false) (or true whatever)))
+
+;; this works
+;; ((pipe (all evaluation) evaluation) '(and (not false) (or true whatever)))
+
+;; but pipe and all are not sufficient for one more level of nesting
+;; ((pipe (all evaluation) evaluation) '(and (not false) (or true (and true whatever))))
+;; ((all evaluation) '(and (not false) (or true (and true whatever))))
+;; ((all evaluation) 'whatever)
 
 
-;(evaluate '(not true))
-
-(evaluate '(and true unknown))
-;(evaluate '(and (not false) (or true whatever)))
+;;https://github.com/brandonbloom/retree/blob/master/src/retree/core.clj
